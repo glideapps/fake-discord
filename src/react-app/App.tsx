@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { marked } from "marked";
+import readmeRaw from "../../README.md?raw";
 import "./App.css";
 
 interface TenantSummary {
@@ -42,7 +44,7 @@ interface TenantState {
   accessTokens: unknown[];
 }
 
-type View = { type: "list" } | { type: "detail"; tenantId: string };
+type View = { type: "list" } | { type: "detail"; tenantId: string } | { type: "docs" };
 
 function DataSection({
   title,
@@ -305,7 +307,7 @@ function App() {
   useEffect(() => {
     if (view.type === "list") {
       fetchTenants();
-    } else {
+    } else if (view.type === "detail") {
       fetchTenantDetail(view.tenantId);
     }
   }, [view, fetchTenants, fetchTenantDetail]);
@@ -313,10 +315,12 @@ function App() {
   const handleRefresh = () => {
     if (view.type === "list") {
       fetchTenants();
-    } else {
+    } else if (view.type === "detail") {
       fetchTenantDetail(view.tenantId);
     }
   };
+
+  const docsHtml = useMemo(() => marked.parse(readmeRaw) as string, []);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
@@ -324,7 +328,7 @@ function App() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold text-gray-800">
-            Fake Discord State Browser
+            Fake Discord
           </h1>
           <div className="text-sm text-gray-500 mt-1 flex items-center gap-1">
             <button
@@ -341,17 +345,40 @@ function App() {
             )}
           </div>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={loading}
-          className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 disabled:opacity-50"
-        >
-          {loading ? "Loading..." : "Refresh"}
-        </button>
+        <div className="flex items-center gap-2">
+          <a
+            href="https://github.com/glideapps/fake-discord"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700"
+          >
+            GitHub
+          </a>
+          <button
+            onClick={() => setView({ type: "docs" })}
+            className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700"
+          >
+            Docs
+          </button>
+          {view.type !== "docs" && (
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 disabled:opacity-50"
+            >
+              {loading ? "Loading..." : "Refresh"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Content */}
-      {view.type === "list" ? (
+      {view.type === "docs" ? (
+        <div
+          className="prose prose-sm max-w-none"
+          dangerouslySetInnerHTML={{ __html: docsHtml }}
+        />
+      ) : view.type === "list" ? (
         <TenantList
           tenants={tenants}
           onSelect={(id) => setView({ type: "detail", tenantId: id })}
