@@ -391,6 +391,34 @@ describe("Discord API Endpoints", () => {
       );
       expect(resp.status).toBe(400);
     });
+
+    it("generates unique IDs under concurrent requests", async () => {
+      const COUNT = 20;
+      const responses = await Promise.all(
+        Array.from({ length: COUNT }, (_, i) =>
+          fetch(`${API_BASE}/api/v10/channels/${t.channelId}/messages`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bot ${t.botToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ content: `concurrent-${i}` }),
+          })
+        )
+      );
+
+      // All should succeed (no 500s)
+      for (const resp of responses) {
+        expect(resp.status).toBe(200);
+      }
+
+      // All IDs should be unique
+      const ids = await Promise.all(
+        responses.map(async (r) => ((await r.json()) as { id: string }).id)
+      );
+      const uniqueIds = new Set(ids);
+      expect(uniqueIds.size).toBe(COUNT);
+    });
   });
 
   // 1.6 Edit Message

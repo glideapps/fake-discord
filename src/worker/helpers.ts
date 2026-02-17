@@ -60,12 +60,10 @@ export async function generateId(
   tenantId: string,
   prefix: string
 ): Promise<string> {
-  await db
-    .prepare("UPDATE tenants SET next_id = next_id + 1 WHERE id = ?")
-    .bind(tenantId)
-    .run();
   const row = await db
-    .prepare("SELECT next_id FROM tenants WHERE id = ?")
+    .prepare(
+      "UPDATE tenants SET next_id = next_id + 1 WHERE id = ? RETURNING next_id"
+    )
     .bind(tenantId)
     .first();
   const nextId = (row as { next_id: number }).next_id;
