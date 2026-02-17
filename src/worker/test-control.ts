@@ -243,23 +243,6 @@ export function registerTestRoutes(app: Hono) {
       }
     }
 
-    // Check uniqueness
-    const existingBot = await db
-      .prepare("SELECT id FROM tenants WHERE bot_token = ?")
-      .bind(botToken!)
-      .first();
-    if (existingBot) {
-      return c.json({ error: "botToken already in use" }, 409);
-    }
-
-    const existingClient = await db
-      .prepare("SELECT id FROM tenants WHERE client_id = ?")
-      .bind(clientId!)
-      .first();
-    if (existingClient) {
-      return c.json({ error: "clientId already in use" }, 409);
-    }
-
     // Generate tenant ID
     const tenantId = crypto.randomUUID();
 
@@ -299,7 +282,26 @@ export function registerTestRoutes(app: Hono) {
       }
     }
 
-    await db.batch(stmts);
+    try {
+      await db.batch(stmts);
+    } catch (e) {
+      // Constraint violation — determine which field conflicted
+      const existingBot = await db
+        .prepare("SELECT id FROM tenants WHERE bot_token = ?")
+        .bind(botToken!)
+        .first();
+      if (existingBot) {
+        return c.json({ error: "botToken already in use" }, 409);
+      }
+      const existingClient = await db
+        .prepare("SELECT id FROM tenants WHERE client_id = ?")
+        .bind(clientId!)
+        .first();
+      if (existingClient) {
+        return c.json({ error: "clientId already in use" }, 409);
+      }
+      throw e; // re-throw if it wasn't a uniqueness error
+    }
 
     return c.json(
       {

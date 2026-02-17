@@ -478,6 +478,68 @@ describe("Discord API Endpoints", () => {
       );
       expect(resp.status).toBe(404);
     });
+
+    it("captures all edit history under concurrent edits", async () => {
+      // Create a fresh message for this test
+      const createResp = await fetch(
+        `${API_BASE}/api/v10/channels/${t.channelId}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bot ${t.botToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ content: "v0" }),
+        }
+      );
+      const { id: msgId } = (await createResp.json()) as { id: string };
+
+      const N = 10;
+      const responses = await Promise.all(
+        Array.from({ length: N }, (_, i) =>
+          fetch(
+            `${API_BASE}/api/v10/channels/${t.channelId}/messages/${msgId}`,
+            {
+              method: "PATCH",
+              headers: {
+                Authorization: `Bot ${t.botToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ content: `v${i + 1}` }),
+            }
+          )
+        )
+      );
+
+      // All edits should succeed
+      for (const resp of responses) {
+        expect(resp.status).toBe(200);
+        await resp.json(); // consume body
+      }
+
+      // Check edit history
+      const { body } = await fetchJson(
+        `/_test/${t.tenantId}/messages/${t.channelId}`
+      );
+      const msgs = (
+        body as {
+          messages: Array<{
+            id: string;
+            payload: { content: string };
+            editHistory: Array<{ payload: { content: string } }>;
+          }>;
+        }
+      ).messages;
+      const edited = msgs.find((m) => m.id === msgId)!;
+
+      // Should have exactly N edit history entries (one per edit)
+      expect(edited.editHistory.length).toBe(N);
+
+      // All history payloads should be distinct (no duplicates / lost edits)
+      const historyContents = edited.editHistory.map((e) => e.payload.content);
+      const uniqueContents = new Set(historyContents);
+      expect(uniqueContents.size).toBe(N);
+    });
   });
 
   // 1.7 Add Reaction

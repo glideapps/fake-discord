@@ -247,35 +247,31 @@ export function registerDiscordRoutes(app: Hono) {
       const channelId = c.req.param("channelId");
       const messageId = c.req.param("messageId");
 
-      const message = await db
-        .prepare(
-          "SELECT id, payload FROM messages WHERE tenant_id = ? AND id = ? AND channel_id = ?"
-        )
-        .bind(tenant.id, messageId, channelId)
-        .first();
-
-      if (!message) {
-        return c.json({ message: "Unknown Message" }, 404);
-      }
-
       const body = await requireJsonBody(c);
       if (body instanceof Response) return body;
 
       const now = new Date().toISOString();
 
-      // Batch: save old payload to edits + update message
-      await db.batch([
+      // Atomically copy old payload to edit history and update message in one batch
+      const results = await db.batch([
         db
           .prepare(
-            "INSERT INTO message_edits (tenant_id, message_id, payload, edited_at) VALUES (?, ?, ?, ?)"
+            `INSERT INTO message_edits (tenant_id, message_id, payload, edited_at)
+             SELECT tenant_id, id, payload, ?
+             FROM messages WHERE tenant_id = ? AND id = ? AND channel_id = ?`
           )
-          .bind(tenant.id, messageId, message.payload as string, now),
+          .bind(now, tenant.id, messageId, channelId),
         db
           .prepare(
-            "UPDATE messages SET payload = ? WHERE tenant_id = ? AND id = ?"
+            "UPDATE messages SET payload = ? WHERE tenant_id = ? AND id = ? AND channel_id = ?"
           )
-          .bind(JSON.stringify(body), tenant.id, messageId),
+          .bind(JSON.stringify(body), tenant.id, messageId, channelId),
       ]);
+
+      // If the UPDATE affected 0 rows, the message doesn't exist
+      if (!results[1].meta.changes) {
+        return c.json({ message: "Unknown Message" }, 404);
+      }
 
       return c.json({
         id: messageId,

@@ -59,6 +59,41 @@ describe("Test Control Endpoints", () => {
       await deleteTenant(dupTenantId);
     });
 
+    it("handles concurrent create with same botToken (one 201, one 409)", async () => {
+      const sharedBotToken = `concurrent-bot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const makeBody = (idx: number) =>
+        JSON.stringify({
+          botToken: sharedBotToken,
+          clientId: `concurrent-client-${idx}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          clientSecret: "s",
+          publicKey: TEST_PUBLIC_KEY,
+          privateKey: TEST_PRIVATE_KEY,
+          guilds: {
+            [`g-${idx}`]: { name: "G", channels: { [`c-${idx}`]: { name: "C" } } },
+          },
+        });
+
+      const [resp1, resp2] = await Promise.all([
+        fetchJson("/_test/tenants", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: makeBody(1),
+        }),
+        fetchJson("/_test/tenants", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: makeBody(2),
+        }),
+      ]);
+
+      const statuses = [resp1.status, resp2.status].sort();
+      expect(statuses).toEqual([201, 409]);
+
+      // Clean up the one that succeeded
+      const winner = resp1.status === 201 ? resp1 : resp2;
+      await deleteTenant((winner.body as { tenantId: string }).tenantId);
+    });
+
     it("returns 409 for duplicate clientId", async () => {
       const config = await createTestTenant();
       const dupTenantId = config.tenantId;
