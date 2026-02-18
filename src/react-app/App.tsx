@@ -57,17 +57,17 @@ function DataSection({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="border border-gray-200 rounded-lg">
+    <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800"
       >
-        <span className="font-medium text-gray-700">{title}</span>
+        <span className="font-medium text-gray-700 dark:text-gray-300">{title}</span>
         <span className="flex items-center gap-2">
-          <span className="bg-gray-100 text-gray-600 text-xs font-medium px-2 py-0.5 rounded-full">
+          <span className="bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium px-2 py-0.5 rounded-full">
             {count}
           </span>
-          <span className="text-gray-400 text-sm">{open ? "\u25B2" : "\u25BC"}</span>
+          <span className="text-gray-400 dark:text-gray-500 text-sm">{open ? "\u25B2" : "\u25BC"}</span>
         </span>
       </button>
       {open && <div className="px-4 pb-4">{children}</div>}
@@ -102,7 +102,7 @@ function TenantList({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-gray-200 text-left text-gray-500">
+          <tr className="border-b border-gray-200 dark:border-gray-700 text-left text-gray-500 dark:text-gray-400">
             <th className="py-2 px-3 font-medium">Tenant ID</th>
             <th className="py-2 px-3 font-medium">Client ID</th>
             <th className="py-2 px-3 font-medium">Bot Token</th>
@@ -115,7 +115,7 @@ function TenantList({
             <tr
               key={t.id}
               onClick={() => onSelect(t.id)}
-              className="border-b border-gray-100 hover:bg-blue-50 cursor-pointer"
+              className="border-b border-gray-100 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-gray-800 cursor-pointer"
             >
               <td className="py-2 px-3 font-mono text-xs">{t.id}</td>
               <td className="py-2 px-3 font-mono text-xs">{t.clientId}</td>
@@ -147,7 +147,7 @@ function TenantDetailView({
     <div className="space-y-6">
       {/* Config grid */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-700 mb-3">Configuration</h2>
+        <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200 mb-3">Configuration</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
           {([
             ["Tenant ID", tenant.id],
@@ -157,9 +157,9 @@ function TenantDetailView({
             ["Public Key", tenant.publicKey],
             ["Next ID", String(tenant.nextId)],
           ] as const).map(([label, value]) => (
-            <div key={label} className="bg-gray-50 rounded-lg p-3">
-              <div className="text-gray-500 text-xs mb-1">{label}</div>
-              <div className="font-mono text-xs break-all">{value}</div>
+            <div key={label} className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+              <div className="text-gray-500 dark:text-gray-400 text-xs mb-1">{label}</div>
+              <div className="font-mono text-xs break-all text-gray-900 dark:text-gray-100">{value}</div>
             </div>
           ))}
         </div>
@@ -167,7 +167,7 @@ function TenantDetailView({
 
       {/* Guilds & Channels tree */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-700 mb-3">
+        <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200 mb-3">
           Guilds & Channels
         </h2>
         {guilds.length === 0 ? (
@@ -175,16 +175,16 @@ function TenantDetailView({
         ) : (
           <div className="space-y-2">
             {guilds.map((g) => (
-              <div key={g.id} className="border border-gray-200 rounded-lg p-3">
-                <div className="font-medium text-gray-700">
+              <div key={g.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+                <div className="font-medium text-gray-700 dark:text-gray-300">
                   {g.name}{" "}
-                  <span className="text-gray-400 font-mono text-xs">({g.id})</span>
+                  <span className="text-gray-400 dark:text-gray-500 font-mono text-xs">({g.id})</span>
                 </div>
                 <div className="ml-4 mt-1 space-y-0.5">
                   {g.channels.map((ch) => (
-                    <div key={ch.id} className="text-sm text-gray-600">
+                    <div key={ch.id} className="text-sm text-gray-600 dark:text-gray-400">
                       # {ch.name}{" "}
-                      <span className="text-gray-400 font-mono text-xs">
+                      <span className="text-gray-400 dark:text-gray-500 font-mono text-xs">
                         ({ch.id})
                       </span>
                     </div>
@@ -199,7 +199,7 @@ function TenantDetailView({
       {/* Mutable state sections */}
       {state && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-700 mb-3">State</h2>
+          <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200 mb-3">State</h2>
           <div className="space-y-2">
             <DataSection title="Messages" count={state.messages.length}>
               {state.messages.length === 0 ? (
@@ -327,10 +327,10 @@ function App() {
       {/* Top bar */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-bold text-gray-800">
+          <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">
             Fake Discord
           </h1>
-          <div className="text-sm text-gray-500 mt-1 flex items-center gap-1">
+          <div className="text-sm text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1">
             <button
               onClick={() => setView({ type: "list" })}
               className="hover:text-blue-600 hover:underline"
@@ -350,13 +350,13 @@ function App() {
             href="https://github.com/glideapps/fake-discord"
             target="_blank"
             rel="noopener noreferrer"
-            className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700"
+            className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-700 dark:text-gray-300"
           >
             GitHub
           </a>
           <button
             onClick={() => setView({ type: "docs" })}
-            className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700"
+            className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-700 dark:text-gray-300"
           >
             Docs
           </button>
@@ -364,7 +364,7 @@ function App() {
             <button
               onClick={handleRefresh}
               disabled={loading}
-              className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 disabled:opacity-50"
+              className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-700 dark:text-gray-300 disabled:opacity-50"
             >
               {loading ? "Loading..." : "Refresh"}
             </button>
@@ -375,7 +375,7 @@ function App() {
       {/* Content */}
       {view.type === "docs" ? (
         <div
-          className="prose prose-sm max-w-none"
+          className="prose prose-sm dark:prose-invert max-w-none"
           dangerouslySetInnerHTML={{ __html: docsHtml }}
         />
       ) : view.type === "list" ? (

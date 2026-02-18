@@ -8,6 +8,13 @@
   color: #213547;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #e2e8f0;
+    background-color: #0f172a;
+  }
+}
+
 body {
   min-height: 100vh;
 }
