@@ -592,7 +592,7 @@ POST /_test/:tenantId/reset
 
 Clears all mutable state for this tenant but preserves the tenant config (bot token, client ID, guilds, channels). Also resets the ID counter back to 1.
 
-**What gets cleared:** messages, message edits, reactions, interaction responses, followups, registered commands, auth codes, access tokens.
+**What gets cleared:** messages, message edits, reactions, interaction responses, followups, registered commands, auth codes, access tokens, audit logs.
 
 **What is preserved:** tenant credentials, guilds, channels.
 
@@ -706,6 +706,65 @@ The `statusCode` and `body` reflect the response from the webhook URL. If the we
 
 ---
 
+### 2.11 Get Audit Logs
+
+```
+GET /_test/:tenantId/audit-logs?limit=100&offset=0
+```
+
+Returns all audit log entries for this tenant, most recent first. Supports pagination via `limit` (default 100, max 1000) and `offset` (default 0).
+
+**Response (200):**
+```json
+{
+  "logs": [
+    {
+      "id": 42,
+      "tenantId": "<tenantId>",
+      "method": "POST",
+      "url": "http://localhost:3210/api/v10/channels/chan-1/messages",
+      "requestBody": { "content": "Hello!" },
+      "responseStatus": 200,
+      "responseBody": { "id": "msg-1", "channel_id": "chan-1", "content": "Hello!" },
+      "createdAt": "2026-02-19T12:34:56.789Z"
+    }
+  ],
+  "total": 42,
+  "limit": 100,
+  "offset": 0
+}
+```
+
+**Errors:**
+- `404 { "error": "Tenant not found" }`
+
+---
+
+## Automatic Cleanup
+
+Tenants are automatically cleaned up after 24 hours via a cron job that runs hourly (`0 * * * *`). Each tenant has a `created_at` timestamp set at creation time. The cron job finds all tenants with `created_at` older than 24 hours and deletes them along with all their data.
+
+To manually trigger cleanup: `npx fling cron trigger cleanup-old-tenants`
+
+---
+
+## Audit Logging
+
+Every HTTP request/response is automatically logged to the `audit_logs` table. The middleware captures:
+- HTTP method and full URL
+- Request body (for non-GET/HEAD requests)
+- Response status code and body
+- Associated tenant ID (null if auth failed or no tenant context)
+- Timestamp
+
+Audit logs are:
+- Cleared when a tenant is reset (`POST /_test/:tenantId/reset`)
+- Deleted when a tenant is deleted (`DELETE /_test/tenants/:tenantId`)
+- Available per-tenant via `GET /_test/:tenantId/audit-logs`
+- Available globally via `GET /_test/browse/audit-logs`
+
+---
+
 ## Browse API Endpoints
 
 These read-only endpoints power the state browser frontend and allow inspecting all tenant data. They live under `/_test/browse/`.
@@ -730,7 +789,9 @@ Returns all tenants with guild and channel counts.
       "publicKey": "...",
       "nextId": 1,
       "guildCount": 1,
-      "channelCount": 2
+      "channelCount": 2,
+      "createdAt": "2026-02-19T12:34:56.789Z",
+      "logCount": 42
     }
   ]
 }
@@ -749,7 +810,7 @@ Returns tenant config with guilds and nested channels.
 **Response (200):**
 ```json
 {
-  "tenant": { "id": "...", "botToken": "...", "clientId": "...", "clientSecret": "...", "publicKey": "...", "nextId": 1 },
+  "tenant": { "id": "...", "botToken": "...", "clientId": "...", "clientSecret": "...", "publicKey": "...", "nextId": 1, "createdAt": "2026-02-19T12:34:56.789Z", "logCount": 42 },
   "guilds": [
     {
       "id": "guild-1",
@@ -784,12 +845,44 @@ Returns all mutable state for a tenant in one call: messages (with edit history)
   "followups": [...],
   "commands": [...],
   "authCodes": [...],
-  "accessTokens": [...]
+  "accessTokens": [...],
+  "auditLogs": [...]
 }
 ```
 
 **Errors:**
 - `404 { "error": "Tenant not found" }`
+
+---
+
+### 3.4 Global Audit Logs
+
+```
+GET /_test/browse/audit-logs?limit=100&offset=0
+```
+
+Returns audit logs across all tenants, most recent first. Supports pagination.
+
+**Response (200):**
+```json
+{
+  "logs": [
+    {
+      "id": 42,
+      "tenantId": "<tenantId or null>",
+      "method": "POST",
+      "url": "...",
+      "requestBody": {...},
+      "responseStatus": 200,
+      "responseBody": {...},
+      "createdAt": "2026-02-19T12:34:56.789Z"
+    }
+  ],
+  "total": 100,
+  "limit": 100,
+  "offset": 0
+}
+```
 
 ---
 
@@ -846,7 +939,8 @@ tenants (
   client_secret TEXT NOT NULL,
   public_key TEXT NOT NULL,
   private_key TEXT NOT NULL,
-  next_id INTEGER NOT NULL DEFAULT 1
+  next_id INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 )
 
 guilds (
@@ -934,6 +1028,21 @@ registered_commands (
 )
 ```
 
+### Audit Log Table
+
+```sql
+audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT,              -- nullable: failed auth = NULL
+  method TEXT NOT NULL,
+  url TEXT NOT NULL,
+  request_body TEXT,
+  response_status INTEGER NOT NULL,
+  response_body TEXT,
+  created_at TEXT NOT NULL
+)
+```
+
 ### Indexes
 
 ```sql
@@ -944,6 +1053,8 @@ idx_commands_guild         ON registered_commands (tenant_id, guild_id, register
 idx_auth_codes_tenant      ON auth_codes (tenant_id)
 idx_access_tokens_tenant   ON access_tokens (tenant_id)
 idx_message_edits_tenant   ON message_edits (tenant_id)
+idx_audit_logs_tenant      ON audit_logs (tenant_id, created_at)
+idx_tenants_created_at     ON tenants (created_at)
 ```
 
 ---
@@ -961,6 +1072,8 @@ src/worker/
     helpers.test.ts     # Unit tests for pure helper functions
     test-control.test.ts # Integration tests for test control endpoints
     discord-api.test.ts # Integration tests for Discord API endpoints
+    audit-logs.test.ts  # Integration tests for audit logging and log APIs
+    cron-cleanup.test.ts # Tests for tenant expiry and created_at
 vite.config.ts          # Vite config with proxy entries for /api, /_test, /oauth2
 vitest.config.ts        # Vitest configuration
 package.json            # Dependencies and scripts
@@ -996,10 +1109,12 @@ npm test
 
 If the server is already running on port 3210 (e.g. from `npm start`), tests will use it and skip lifecycle management.
 
-The test suite has 64 tests across 3 files:
+The test suite has 80 tests across 5 files:
 - `helpers.test.ts` -- 7 unit tests for hex encoding, key handling, and Ed25519 signing
-- `test-control.test.ts` -- 27 integration tests for all test control endpoints
-- `discord-api.test.ts` -- 30 integration tests for all Discord API endpoints
+- `test-control.test.ts` -- 28 integration tests for all test control endpoints
+- `discord-api.test.ts` -- 32 integration tests for all Discord API endpoints
+- `audit-logs.test.ts` -- 10 integration tests for audit logging and log retrieval
+- `cron-cleanup.test.ts` -- 3 tests for tenant expiry and `created_at`
 
 ### Vite Proxy Configuration
 
@@ -1148,6 +1263,7 @@ await fetch(`http://localhost:3210/_test/tenants/${tenantId}`, { method: "DELETE
 | `POST` | `/_test/:tenantId/reset` | [2.8](#28-reset-tenant-state) |
 | `POST` | `/_test/:tenantId/auth-code` | [2.9](#29-create-authorization-code) |
 | `POST` | `/_test/:tenantId/send-interaction` | [2.10](#210-send-signed-interaction) |
+| `GET` | `/_test/:tenantId/audit-logs` | [2.11](#211-get-audit-logs) |
 
 ### Browse Routes
 
@@ -1156,3 +1272,4 @@ await fetch(`http://localhost:3210/_test/tenants/${tenantId}`, { method: "DELETE
 | `GET` | `/_test/browse/tenants` | [3.1](#31-list-tenants) |
 | `GET` | `/_test/browse/tenants/:tenantId` | [3.2](#32-tenant-detail) |
 | `GET` | `/_test/browse/tenants/:tenantId/state` | [3.3](#33-tenant-state) |
+| `GET` | `/_test/browse/audit-logs` | [3.4](#34-global-audit-logs) |

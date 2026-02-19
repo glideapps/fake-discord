@@ -12,6 +12,8 @@ interface TenantSummary {
   nextId: number;
   guildCount: number;
   channelCount: number;
+  createdAt: string;
+  logCount: number;
 }
 
 interface Channel {
@@ -32,6 +34,19 @@ interface TenantDetail {
   clientSecret: string;
   publicKey: string;
   nextId: number;
+  createdAt: string;
+  logCount: number;
+}
+
+interface AuditLogEntry {
+  id: number;
+  tenantId?: string | null;
+  method: string;
+  url: string;
+  requestBody: unknown;
+  responseStatus: number;
+  responseBody: unknown;
+  createdAt: string;
 }
 
 interface TenantState {
@@ -42,6 +57,7 @@ interface TenantState {
   commands: unknown[];
   authCodes: unknown[];
   accessTokens: unknown[];
+  auditLogs: AuditLogEntry[];
 }
 
 type View = { type: "list" } | { type: "detail"; tenantId: string } | { type: "docs" };
@@ -83,6 +99,91 @@ function JsonView({ data }: { data: unknown }) {
   );
 }
 
+function formatRelativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+const METHOD_COLORS: Record<string, string> = {
+  GET: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
+  POST: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
+  PATCH: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
+  PUT: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300",
+  DELETE: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
+};
+
+function statusColor(status: number): string {
+  if (status < 300) return "text-green-600 dark:text-green-400";
+  if (status < 500) return "text-yellow-600 dark:text-yellow-400";
+  return "text-red-600 dark:text-red-400";
+}
+
+function stripOrigin(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.pathname + u.search;
+  } catch {
+    return url;
+  }
+}
+
+function AuditLogList({ logs }: { logs: AuditLogEntry[] }) {
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  if (logs.length === 0) {
+    return <p className="text-gray-400 italic text-sm">No audit logs</p>;
+  }
+
+  return (
+    <div className="space-y-1">
+      {logs.map((log) => (
+        <div key={log.id} className="border border-gray-100 dark:border-gray-800 rounded">
+          <button
+            onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            <span className={`px-1.5 py-0.5 rounded font-mono font-bold text-[10px] ${METHOD_COLORS[log.method] || "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"}`}>
+              {log.method}
+            </span>
+            <span className="font-mono text-gray-700 dark:text-gray-300 truncate flex-1">
+              {stripOrigin(log.url)}
+            </span>
+            <span className={`font-mono font-bold ${statusColor(log.responseStatus)}`}>
+              {log.responseStatus}
+            </span>
+            <span className="text-gray-400 dark:text-gray-500 whitespace-nowrap">
+              {formatRelativeTime(log.createdAt)}
+            </span>
+          </button>
+          {expandedId === log.id && (
+            <div className="px-3 pb-2 space-y-2">
+              {log.requestBody != null && (
+                <div>
+                  <div className="text-[10px] text-gray-500 dark:text-gray-400 uppercase font-medium mb-1">Request Body</div>
+                  <JsonView data={log.requestBody} />
+                </div>
+              )}
+              {log.responseBody != null && (
+                <div>
+                  <div className="text-[10px] text-gray-500 dark:text-gray-400 uppercase font-medium mb-1">Response Body</div>
+                  <JsonView data={log.responseBody} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TenantList({
   tenants,
   onSelect,
@@ -108,6 +209,8 @@ function TenantList({
             <th className="py-2 px-3 font-medium">Bot Token</th>
             <th className="py-2 px-3 font-medium text-right">Guilds</th>
             <th className="py-2 px-3 font-medium text-right">Channels</th>
+            <th className="py-2 px-3 font-medium text-right">Logs</th>
+            <th className="py-2 px-3 font-medium">Created</th>
           </tr>
         </thead>
         <tbody>
@@ -126,6 +229,14 @@ function TenantList({
               </td>
               <td className="py-2 px-3 text-right">{t.guildCount}</td>
               <td className="py-2 px-3 text-right">{t.channelCount}</td>
+              <td className="py-2 px-3 text-right">
+                <span className="bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium px-2 py-0.5 rounded-full">
+                  {t.logCount}
+                </span>
+              </td>
+              <td className="py-2 px-3 text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">
+                {formatRelativeTime(t.createdAt)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -156,6 +267,7 @@ function TenantDetailView({
             ["Bot Token", tenant.botToken],
             ["Public Key", tenant.publicKey],
             ["Next ID", String(tenant.nextId)],
+            ["Created At", tenant.createdAt],
           ] as const).map(([label, value]) => (
             <div key={label} className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
               <div className="text-gray-500 dark:text-gray-400 text-xs mb-1">{label}</div>
@@ -255,6 +367,9 @@ function TenantDetailView({
                 <JsonView data={state.accessTokens} />
               )}
             </DataSection>
+            <DataSection title="Audit Logs" count={state.auditLogs.length}>
+              <AuditLogList logs={state.auditLogs} />
+            </DataSection>
           </div>
         </div>
       )}
@@ -268,16 +383,25 @@ function App() {
   const [tenantDetail, setTenantDetail] = useState<TenantDetail | null>(null);
   const [guilds, setGuilds] = useState<Guild[]>([]);
   const [tenantState, setTenantState] = useState<TenantState | null>(null);
+  const [unassociatedLogs, setUnassociatedLogs] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchTenants = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/_test/browse/tenants");
-      const data = await res.json();
-      setTenants(data.tenants);
+      const [tenantsRes, logsRes] = await Promise.all([
+        fetch("/_test/browse/tenants"),
+        fetch("/_test/browse/audit-logs?limit=500"),
+      ]);
+      const tenantsData = await tenantsRes.json();
+      const logsData = await logsRes.json();
+      setTenants(tenantsData.tenants);
+      setUnassociatedLogs(
+        (logsData.logs as AuditLogEntry[]).filter((l) => l.tenantId == null)
+      );
     } catch {
       setTenants([]);
+      setUnassociatedLogs([]);
     } finally {
       setLoading(false);
     }
@@ -379,10 +503,25 @@ function App() {
           dangerouslySetInnerHTML={{ __html: docsHtml }}
         />
       ) : view.type === "list" ? (
-        <TenantList
-          tenants={tenants}
-          onSelect={(id) => setView({ type: "detail", tenantId: id })}
-        />
+        <div className="space-y-8">
+          <TenantList
+            tenants={tenants}
+            onSelect={(id) => setView({ type: "detail", tenantId: id })}
+          />
+          {unassociatedLogs.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200 mb-3">
+                Unassociated Audit Logs
+                <span className="ml-2 text-sm font-normal text-gray-400 dark:text-gray-500">
+                  (no tenant — failed auth, unknown routes, etc.)
+                </span>
+              </h2>
+              <DataSection title="Logs" count={unassociatedLogs.length}>
+                <AuditLogList logs={unassociatedLogs} />
+              </DataSection>
+            </div>
+          )}
+        </div>
       ) : tenantDetail ? (
         <TenantDetailView
           tenant={tenantDetail}

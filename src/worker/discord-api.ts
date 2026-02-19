@@ -24,6 +24,7 @@ export function registerDiscordRoutes(app: Hono) {
       return c.json({ error: "Unknown client_id" }, 400);
     }
 
+    c.set("tenantId", tenant.id);
     const redirectUri = c.req.query("redirect_uri") || "";
     const state = c.req.query("state") || "";
 
@@ -73,6 +74,8 @@ export function registerDiscordRoutes(app: Hono) {
     if (tenant.client_secret !== clientSecret) {
       return c.json({ error: "invalid_client" }, 401);
     }
+
+    c.set("tenantId", tenant.id);
 
     // Read auth code then delete it (one-time use)
     const authCode = await db
@@ -146,6 +149,8 @@ export function registerDiscordRoutes(app: Hono) {
       return c.json({ message: "401: Unauthorized" }, 401);
     }
 
+    c.set("tenantId", tenant.id);
+
     return c.json({
       id: `fake-user-${tenant.id}`,
       username: "fakeuser",
@@ -166,6 +171,7 @@ export function registerDiscordRoutes(app: Hono) {
       return c.json({ message: "401: Unauthorized" }, 401);
     }
 
+    c.set("tenantId", tenant.id);
     const channelId = c.req.param("channelId");
     const channel = await db
       .prepare(
@@ -198,6 +204,7 @@ export function registerDiscordRoutes(app: Hono) {
       return c.json({ message: "401: Unauthorized" }, 401);
     }
 
+    c.set("tenantId", tenant.id);
     const channelId = c.req.param("channelId");
     const channel = await db
       .prepare(
@@ -244,6 +251,7 @@ export function registerDiscordRoutes(app: Hono) {
         return c.json({ message: "401: Unauthorized" }, 401);
       }
 
+      c.set("tenantId", tenant.id);
       const channelId = c.req.param("channelId");
       const messageId = c.req.param("messageId");
 
@@ -295,6 +303,7 @@ export function registerDiscordRoutes(app: Hono) {
         return c.json({ message: "401: Unauthorized" }, 401);
       }
 
+      c.set("tenantId", tenant.id);
       const channelId = c.req.param("channelId");
       const messageId = c.req.param("messageId");
       const emojiRaw = c.req.param("emoji");
@@ -346,6 +355,7 @@ export function registerDiscordRoutes(app: Hono) {
         return c.json({ message: "Unknown Application" }, 404);
       }
 
+      c.set("tenantId", tenant.id);
       const body = await requireJsonBody(c);
       if (body instanceof Response) return body;
 
@@ -390,6 +400,7 @@ export function registerDiscordRoutes(app: Hono) {
         return c.json({ message: "Unknown Application" }, 404);
       }
 
+      c.set("tenantId", tenant.id);
       const body = await requireJsonBody(c);
       if (body instanceof Response) return body;
 
@@ -431,6 +442,7 @@ export function registerDiscordRoutes(app: Hono) {
         return c.json({ message: "401: Unauthorized" }, 401);
       }
 
+      c.set("tenantId", tenant.id);
       const clientId = c.req.param("clientId");
       const guildId = c.req.param("guildId");
 

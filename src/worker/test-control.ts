@@ -4,13 +4,15 @@ import {
   resolveTenantById,
   requireJsonBody,
   signPayload,
+  deleteTenantData,
+  tryParseJson,
 } from "./helpers.js";
 
 export function registerTestRoutes(app: Hono) {
   // Browse API: List all tenants with counts
   app.get("/_test/browse/tenants", async (c) => {
     const { results: tenants } = await db
-      .prepare("SELECT id, bot_token, client_id, client_secret, public_key, next_id FROM tenants ORDER BY id")
+      .prepare("SELECT id, bot_token, client_id, client_secret, public_key, next_id, created_at FROM tenants ORDER BY id")
       .all();
 
     const { results: guildCounts } = await db
@@ -21,8 +23,13 @@ export function registerTestRoutes(app: Hono) {
       .prepare("SELECT tenant_id, COUNT(*) as cnt FROM channels GROUP BY tenant_id")
       .all();
 
+    const { results: logCounts } = await db
+      .prepare("SELECT tenant_id, COUNT(*) as cnt FROM audit_logs WHERE tenant_id IS NOT NULL GROUP BY tenant_id")
+      .all();
+
     const guildMap = new Map(guildCounts.map((r) => [r.tenant_id as string, r.cnt as number]));
     const channelMap = new Map(channelCounts.map((r) => [r.tenant_id as string, r.cnt as number]));
+    const logMap = new Map(logCounts.map((r) => [r.tenant_id as string, r.cnt as number]));
 
     return c.json({
       tenants: tenants.map((t) => ({
@@ -34,6 +41,8 @@ export function registerTestRoutes(app: Hono) {
         nextId: t.next_id as number,
         guildCount: guildMap.get(t.id as string) || 0,
         channelCount: channelMap.get(t.id as string) || 0,
+        createdAt: t.created_at as string,
+        logCount: logMap.get(t.id as string) || 0,
       })),
     });
   });
@@ -42,7 +51,7 @@ export function registerTestRoutes(app: Hono) {
   app.get("/_test/browse/tenants/:tenantId", async (c) => {
     const tenantId = c.req.param("tenantId");
     const tenant = await db
-      .prepare("SELECT id, bot_token, client_id, client_secret, public_key, next_id FROM tenants WHERE id = ?")
+      .prepare("SELECT id, bot_token, client_id, client_secret, public_key, next_id, created_at FROM tenants WHERE id = ?")
       .bind(tenantId)
       .first();
     if (!tenant) {
@@ -59,6 +68,11 @@ export function registerTestRoutes(app: Hono) {
       .bind(tenantId)
       .all();
 
+    const logCount = await db
+      .prepare("SELECT COUNT(*) as cnt FROM audit_logs WHERE tenant_id = ?")
+      .bind(tenantId)
+      .first();
+
     const channelsByGuild = new Map<string, Array<{ id: string; name: string }>>();
     for (const ch of channels) {
       const gid = ch.guild_id as string;
@@ -74,6 +88,8 @@ export function registerTestRoutes(app: Hono) {
         clientSecret: tenant.client_secret as string,
         publicKey: tenant.public_key as string,
         nextId: tenant.next_id as number,
+        createdAt: tenant.created_at as string,
+        logCount: (logCount?.cnt as number) || 0,
       },
       guilds: guilds.map((g) => ({
         id: g.id as string,
@@ -152,6 +168,11 @@ export function registerTestRoutes(app: Hono) {
       .bind(tenantId)
       .all();
 
+    const { results: auditLogRows } = await db
+      .prepare("SELECT id, method, url, request_body, response_status, response_body, created_at FROM audit_logs WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 100")
+      .bind(tenantId)
+      .all();
+
     return c.json({
       messages,
       reactions: reactionRows.map((r) => ({
@@ -186,6 +207,46 @@ export function registerTestRoutes(app: Hono) {
       accessTokens: tokenRows.map((r) => ({
         token: r.token as string,
       })),
+      auditLogs: auditLogRows.map((r) => ({
+        id: r.id as number,
+        method: r.method as string,
+        url: r.url as string,
+        requestBody: tryParseJson(r.request_body as string | null),
+        responseStatus: r.response_status as number,
+        responseBody: tryParseJson(r.response_body as string | null),
+        createdAt: r.created_at as string,
+      })),
+    });
+  });
+
+  // Browse API: Global audit logs
+  app.get("/_test/browse/audit-logs", async (c) => {
+    const limit = Math.min(parseInt(c.req.query("limit") || "100", 10), 1000);
+    const offset = parseInt(c.req.query("offset") || "0", 10);
+
+    const total = await db
+      .prepare("SELECT COUNT(*) as cnt FROM audit_logs")
+      .first();
+
+    const { results } = await db
+      .prepare("SELECT id, tenant_id, method, url, request_body, response_status, response_body, created_at FROM audit_logs ORDER BY created_at DESC LIMIT ? OFFSET ?")
+      .bind(limit, offset)
+      .all();
+
+    return c.json({
+      logs: results.map((r) => ({
+        id: r.id as number,
+        tenantId: r.tenant_id as string | null,
+        method: r.method as string,
+        url: r.url as string,
+        requestBody: tryParseJson(r.request_body as string | null),
+        responseStatus: r.response_status as number,
+        responseBody: tryParseJson(r.response_body as string | null),
+        createdAt: r.created_at as string,
+      })),
+      total: (total?.cnt as number) || 0,
+      limit,
+      offset,
     });
   });
 
@@ -245,13 +306,14 @@ export function registerTestRoutes(app: Hono) {
 
     // Generate tenant ID
     const tenantId = crypto.randomUUID();
+    const now = new Date().toISOString();
 
     // Build batch: insert tenant + guilds + channels
     const stmts = [
       db
         .prepare(
-          `INSERT INTO tenants (id, bot_token, client_id, client_secret, public_key, private_key, next_id)
-           VALUES (?, ?, ?, ?, ?, ?, 1)`
+          `INSERT INTO tenants (id, bot_token, client_id, client_secret, public_key, private_key, next_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, ?)`
         )
         .bind(
           tenantId,
@@ -259,7 +321,8 @@ export function registerTestRoutes(app: Hono) {
           clientId!,
           clientSecret!,
           publicKey!,
-          privateKey!
+          privateKey!,
+          now
         ),
     ];
 
@@ -303,6 +366,8 @@ export function registerTestRoutes(app: Hono) {
       throw e; // re-throw if it wasn't a uniqueness error
     }
 
+    c.set("tenantId", tenantId);
+
     return c.json(
       {
         tenantId,
@@ -322,27 +387,8 @@ export function registerTestRoutes(app: Hono) {
       return c.json({ error: "Tenant not found" }, 404);
     }
 
-    await db.batch([
-      db.prepare("DELETE FROM followups WHERE tenant_id = ?").bind(tenantId),
-      db
-        .prepare("DELETE FROM interaction_responses WHERE tenant_id = ?")
-        .bind(tenantId),
-      db
-        .prepare("DELETE FROM registered_commands WHERE tenant_id = ?")
-        .bind(tenantId),
-      db.prepare("DELETE FROM reactions WHERE tenant_id = ?").bind(tenantId),
-      db
-        .prepare("DELETE FROM message_edits WHERE tenant_id = ?")
-        .bind(tenantId),
-      db.prepare("DELETE FROM messages WHERE tenant_id = ?").bind(tenantId),
-      db
-        .prepare("DELETE FROM access_tokens WHERE tenant_id = ?")
-        .bind(tenantId),
-      db.prepare("DELETE FROM auth_codes WHERE tenant_id = ?").bind(tenantId),
-      db.prepare("DELETE FROM channels WHERE tenant_id = ?").bind(tenantId),
-      db.prepare("DELETE FROM guilds WHERE tenant_id = ?").bind(tenantId),
-      db.prepare("DELETE FROM tenants WHERE id = ?").bind(tenantId),
-    ]);
+    c.set("tenantId", tenantId);
+    await deleteTenantData(tenantId);
 
     return c.json({ deleted: true });
   });
@@ -355,6 +401,8 @@ export function registerTestRoutes(app: Hono) {
     if (!tenant) {
       return c.json({ error: "Tenant not found" }, 404);
     }
+
+    c.set("tenantId", tenantId);
 
     const { results: msgRows } = await db
       .prepare(
@@ -412,6 +460,8 @@ export function registerTestRoutes(app: Hono) {
       return c.json({ error: "Tenant not found" }, 404);
     }
 
+    c.set("tenantId", tenantId);
+
     const { results } = await db
       .prepare(
         `SELECT channel_id, message_id, emoji, created_at
@@ -440,6 +490,8 @@ export function registerTestRoutes(app: Hono) {
     if (!tenant) {
       return c.json({ error: "Tenant not found" }, 404);
     }
+
+    c.set("tenantId", tenantId);
 
     const row = await db
       .prepare(
@@ -472,6 +524,8 @@ export function registerTestRoutes(app: Hono) {
       return c.json({ error: "Tenant not found" }, 404);
     }
 
+    c.set("tenantId", tenantId);
+
     const { results } = await db
       .prepare(
         `SELECT id, payload, created_at
@@ -499,6 +553,8 @@ export function registerTestRoutes(app: Hono) {
     if (!tenant) {
       return c.json({ error: "Tenant not found" }, 404);
     }
+
+    c.set("tenantId", tenantId);
 
     const { results } = await db
       .prepare(
@@ -530,7 +586,10 @@ export function registerTestRoutes(app: Hono) {
       return c.json({ error: "Tenant not found" }, 404);
     }
 
+    c.set("tenantId", tenantId);
+
     await db.batch([
+      db.prepare("DELETE FROM audit_logs WHERE tenant_id = ?").bind(tenantId),
       db.prepare("DELETE FROM followups WHERE tenant_id = ?").bind(tenantId),
       db
         .prepare("DELETE FROM interaction_responses WHERE tenant_id = ?")
@@ -562,6 +621,8 @@ export function registerTestRoutes(app: Hono) {
     if (!tenant) {
       return c.json({ error: "Tenant not found" }, 404);
     }
+
+    c.set("tenantId", tenantId);
 
     const body = await requireJsonBody(c);
     if (body instanceof Response) return body;
@@ -604,6 +665,8 @@ export function registerTestRoutes(app: Hono) {
     if (!tenant) {
       return c.json({ error: "Tenant not found" }, 404);
     }
+
+    c.set("tenantId", tenantId);
 
     const body = await requireJsonBody(c);
     if (body instanceof Response) return body;
@@ -659,5 +722,45 @@ export function registerTestRoutes(app: Hono) {
         502
       );
     }
+  });
+
+  // 2.11 Get Audit Logs (per-tenant)
+  app.get("/_test/:tenantId/audit-logs", async (c) => {
+    const tenantId = c.req.param("tenantId");
+    const tenant = await resolveTenantById(tenantId);
+    if (!tenant) {
+      return c.json({ error: "Tenant not found" }, 404);
+    }
+
+    c.set("tenantId", tenantId);
+
+    const limit = Math.min(parseInt(c.req.query("limit") || "100", 10), 1000);
+    const offset = parseInt(c.req.query("offset") || "0", 10);
+
+    const total = await db
+      .prepare("SELECT COUNT(*) as cnt FROM audit_logs WHERE tenant_id = ?")
+      .bind(tenantId)
+      .first();
+
+    const { results } = await db
+      .prepare("SELECT id, method, url, request_body, response_status, response_body, created_at FROM audit_logs WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?")
+      .bind(tenantId, limit, offset)
+      .all();
+
+    return c.json({
+      logs: results.map((r) => ({
+        id: r.id as number,
+        tenantId,
+        method: r.method as string,
+        url: r.url as string,
+        requestBody: tryParseJson(r.request_body as string | null),
+        responseStatus: r.response_status as number,
+        responseBody: tryParseJson(r.response_body as string | null),
+        createdAt: r.created_at as string,
+      })),
+      total: (total?.cnt as number) || 0,
+      limit,
+      offset,
+    });
   });
 }

@@ -12,6 +12,7 @@ export interface TenantRow {
   public_key: string;
   private_key: string;
   next_id: number;
+  created_at: string;
 }
 
 export async function resolveTenantByBotToken(
@@ -166,4 +167,34 @@ export async function verifySignature(
   const signature = hexToBytes(signatureHex);
   const publicKey = hexToBytes(publicKeyHex);
   return ed.verifyAsync(signature, message, publicKey);
+}
+
+// --- Shared tenant deletion ---
+
+export async function deleteTenantData(tenantId: string): Promise<void> {
+  await db.batch([
+    db.prepare("DELETE FROM audit_logs WHERE tenant_id = ?").bind(tenantId),
+    db.prepare("DELETE FROM followups WHERE tenant_id = ?").bind(tenantId),
+    db.prepare("DELETE FROM interaction_responses WHERE tenant_id = ?").bind(tenantId),
+    db.prepare("DELETE FROM registered_commands WHERE tenant_id = ?").bind(tenantId),
+    db.prepare("DELETE FROM reactions WHERE tenant_id = ?").bind(tenantId),
+    db.prepare("DELETE FROM message_edits WHERE tenant_id = ?").bind(tenantId),
+    db.prepare("DELETE FROM messages WHERE tenant_id = ?").bind(tenantId),
+    db.prepare("DELETE FROM access_tokens WHERE tenant_id = ?").bind(tenantId),
+    db.prepare("DELETE FROM auth_codes WHERE tenant_id = ?").bind(tenantId),
+    db.prepare("DELETE FROM channels WHERE tenant_id = ?").bind(tenantId),
+    db.prepare("DELETE FROM guilds WHERE tenant_id = ?").bind(tenantId),
+    db.prepare("DELETE FROM tenants WHERE id = ?").bind(tenantId),
+  ]);
+}
+
+// --- JSON parsing utility ---
+
+export function tryParseJson(text: string | null): unknown {
+  if (text === null) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }

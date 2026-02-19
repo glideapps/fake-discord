@@ -43,6 +43,8 @@ These routes are called by the smoke test runner. They are **not** part of the D
 | `POST` | `/__test/:tenantId/reset` | [2.8](#28-reset-tenant-state) |
 | `POST` | `/__test/:tenantId/auth-code` | [2.9](#29-create-authorization-code) |
 | `POST` | `/__test/:tenantId/send-interaction` | [2.10](#210-send-signed-interaction) |
+| `GET` | `/__test/:tenantId/audit-logs` | [2.11](#211-get-audit-logs) |
+| `GET` | `/__test/browse/audit-logs` | [3.4](#34-global-audit-logs) |
 
 ---
 
@@ -754,6 +756,8 @@ TenantState {
     }>
   }
 
+  createdAt: string  // ISO 8601 timestamp, set at creation
+
   // Mutable state (cleared by reset)
   authCodes: Map<code, { guildId: string, redirectUri: string }>
   messages: Map<channelId, Message[]>
@@ -761,6 +765,7 @@ TenantState {
   interactionResponses: Map<interactionToken, { payload, respondedAt }>
   followups: Map<interactionToken, Array<{ id, payload, createdAt }>>
   registeredCommands: Map<guildId, Array<{ id, payload, registeredAt }>>
+  auditLogs: Array<{ id, method, url, requestBody, responseStatus, responseBody, createdAt }>
   nextId: number  // monotonic counter for generating unique IDs
 }
 
