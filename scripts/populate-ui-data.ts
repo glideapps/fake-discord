@@ -42,7 +42,6 @@ async function createTenant(label: string) {
           channels: {
             [`chan-${suffix}-general`]: { name: "general" },
             [`chan-${suffix}-random`]: { name: "random" },
-            [`chan-${suffix}-bot`]: { name: "bot-commands" },
           },
         },
       },
@@ -65,7 +64,6 @@ async function createTenant(label: string) {
     channels: [
       `chan-${suffix}-general`,
       `chan-${suffix}-random`,
-      `chan-${suffix}-bot`,
     ],
   };
 }
@@ -157,6 +155,40 @@ async function main() {
       }
     );
     console.log(`  POST message in #random → ${status}`);
+  }
+
+  // Simulate slash command interactions (user invokes /command, bot responds)
+  // Token format: "cmd:<command-name>:<unique>" so the UI can show what was invoked
+  console.log("\n— Alice: simulating slash command interactions —");
+  const interactions = [
+    { cmd: "ping", token: "cmd:ping:001", response: "Pong! Latency: 42ms", followup: "📊 Average latency over last hour: 38ms" },
+    { cmd: "help", token: "cmd:help:002", response: "**Available Commands:**\n• `/ping` — Check bot latency\n• `/help` — Show this message\n• `/roll <sides>` — Roll a die" },
+    { cmd: "roll 6", token: "cmd:roll:003", response: "🎲 You rolled a **4** (d6)", followup: "🎲 Rolling again... you got a **2**!" },
+  ];
+  for (const ix of interactions) {
+    // Bot responds to the interaction
+    const { status } = await fetchJson(
+      `/api/v10/webhooks/${alice.clientId}/${ix.token}/messages/@original`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: ix.response }),
+      }
+    );
+    console.log(`  /${ix.cmd} → bot response ${status}`);
+
+    // Bot sends a followup (if any)
+    if (ix.followup) {
+      const { status: fStatus } = await fetchJson(
+        `/api/v10/webhooks/${alice.clientId}/${ix.token}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: ix.followup }),
+        }
+      );
+      console.log(`    ↳ followup ${fStatus}`);
+    }
   }
 
   // Register some slash commands

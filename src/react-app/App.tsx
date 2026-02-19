@@ -49,11 +49,51 @@ interface AuditLogEntry {
   createdAt: string;
 }
 
+interface MessagePayload {
+  content?: string;
+  embeds?: unknown[];
+  components?: unknown[];
+}
+
+interface MessageEdit {
+  payload: MessagePayload;
+  editedAt: string;
+}
+
+interface Message {
+  id: string;
+  channelId: string;
+  payload: MessagePayload;
+  editHistory?: MessageEdit[];
+  createdAt: string;
+}
+
+interface Reaction {
+  channelId: string;
+  messageId: string;
+  emoji: string;
+  createdAt: string;
+}
+
+interface InteractionResponse {
+  interactionToken: string;
+  responseId: string;
+  payload: MessagePayload;
+  respondedAt: string;
+}
+
+interface Followup {
+  id: string;
+  interactionToken: string;
+  payload: MessagePayload;
+  createdAt: string;
+}
+
 interface TenantState {
-  messages: unknown[];
-  reactions: unknown[];
-  interactionResponses: unknown[];
-  followups: unknown[];
+  messages: Message[];
+  reactions: Reaction[];
+  interactionResponses: InteractionResponse[];
+  followups: Followup[];
   commands: unknown[];
   authCodes: unknown[];
   accessTokens: unknown[];
@@ -184,6 +224,341 @@ function AuditLogList({ logs }: { logs: AuditLogEntry[] }) {
   );
 }
 
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) return "Today";
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
+
+function DiscordMessageView({
+  messages,
+  reactions,
+  channels,
+  interactionResponses,
+  followups,
+}: {
+  messages: Message[];
+  reactions: Reaction[];
+  channels: Channel[];
+  interactionResponses: InteractionResponse[];
+  followups: Followup[];
+}) {
+  const channelMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const ch of channels) m.set(ch.id, ch.name);
+    return m;
+  }, [channels]);
+
+  // Group reactions by messageId
+  const reactionsByMsg = useMemo(() => {
+    const m = new Map<string, Map<string, number>>();
+    for (const r of reactions) {
+      if (!m.has(r.messageId)) m.set(r.messageId, new Map());
+      const emojiMap = m.get(r.messageId)!;
+      emojiMap.set(r.emoji, (emojiMap.get(r.emoji) || 0) + 1);
+    }
+    return m;
+  }, [reactions]);
+
+  const INTERACTIONS_CHANNEL = "__interactions__";
+
+  // Build interaction conversation entries (user invocation + bot response + followups)
+  interface InteractionEntry {
+    id: string;
+    command: string | null; // parsed from token like "cmd:ping:001"
+    response: InteractionResponse;
+    followups: Followup[];
+  }
+
+  const interactionEntries = useMemo(() => {
+    const followupsByToken = new Map<string, Followup[]>();
+    for (const f of followups) {
+      if (!followupsByToken.has(f.interactionToken))
+        followupsByToken.set(f.interactionToken, []);
+      followupsByToken.get(f.interactionToken)!.push(f);
+    }
+    const entries: InteractionEntry[] = [];
+    for (const ir of interactionResponses) {
+      // Parse command name from token (format: "cmd:<name>:<id>")
+      const parts = ir.interactionToken.split(":");
+      const command = parts[0] === "cmd" ? parts[1] : null;
+      entries.push({
+        id: ir.responseId,
+        command,
+        response: ir,
+        followups: followupsByToken.get(ir.interactionToken) || [],
+      });
+      followupsByToken.delete(ir.interactionToken);
+    }
+    return entries;
+  }, [interactionResponses, followups]);
+
+  // Group messages by channel, sorted by createdAt
+  const channelMessages = useMemo(() => {
+    const grouped = new Map<string, Message[]>();
+    for (const msg of messages) {
+      if (!grouped.has(msg.channelId)) grouped.set(msg.channelId, []);
+      grouped.get(msg.channelId)!.push(msg);
+    }
+    for (const msgs of grouped.values()) {
+      msgs.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    }
+    return grouped;
+  }, [messages]);
+
+  const hasInteractions = interactionResponses.length > 0 || followups.length > 0;
+
+  const [activeChannel, setActiveChannel] = useState<string | null>(null);
+
+  // Default to first channel with messages, or first channel overall
+  const selectedChannel = activeChannel
+    || (channelMessages.size > 0 ? channelMessages.keys().next().value! : channels[0]?.id);
+
+  const currentMessages = selectedChannel && selectedChannel !== INTERACTIONS_CHANNEL
+    ? channelMessages.get(selectedChannel) || []
+    : [];
+
+  if (messages.length === 0 && !hasInteractions) {
+    return (
+      <div className="bg-[#313338] rounded-lg p-8 text-center">
+        <p className="text-gray-400 italic">No messages yet</p>
+      </div>
+    );
+  }
+
+  // Get all channels (those with and without messages)
+  const allChannelIds = [
+    ...channels.map((c) => c.id),
+    ...[...channelMessages.keys()].filter(
+      (k) => !channels.some((c) => c.id === k)
+    ),
+  ];
+
+  const channelName = (id: string) =>
+    id === INTERACTIONS_CHANNEL ? "interactions" : channelMap.get(id) || id;
+
+  return (
+    <div className="bg-[#313338] rounded-lg overflow-hidden flex" style={{ minHeight: 400 }}>
+      {/* Channel sidebar */}
+      <div className="w-56 bg-[#2b2d31] flex-shrink-0 border-r border-[#1e1f22]">
+        <div className="px-3 pt-3 pb-2">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-[#949ba4] px-1">
+            Channels
+          </div>
+        </div>
+        <div className="space-y-0.5 px-2">
+          {[...allChannelIds, ...(hasInteractions ? [INTERACTIONS_CHANNEL] : [])].map((chId) => {
+            const name = channelName(chId);
+            const msgCount = chId === INTERACTIONS_CHANNEL
+              ? interactionEntries.length
+              : channelMessages.get(chId)?.length || 0;
+            const isActive = chId === selectedChannel;
+            const icon = chId === INTERACTIONS_CHANNEL ? "⚡" : "#";
+            return (
+              <button
+                key={chId}
+                onClick={() => setActiveChannel(chId)}
+                className={`w-full flex items-center gap-1.5 px-2 py-1 rounded text-sm text-left ${
+                  isActive
+                    ? "bg-[#404249] text-white"
+                    : "text-[#949ba4] hover:bg-[#35373c] hover:text-[#dbdee1]"
+                }`}
+              >
+                <span className="text-[#949ba4] text-lg leading-none">{icon}</span>
+                <span className="truncate flex-1">{name}</span>
+                {msgCount > 0 && (
+                  <span className="text-[10px] text-[#949ba4] bg-[#1e1f22] rounded-full px-1.5 py-0.5">
+                    {msgCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Message area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Channel header */}
+        <div className="h-12 border-b border-[#1e1f22] flex items-center px-4 flex-shrink-0">
+          <span className="text-[#949ba4] text-xl mr-1.5">
+            {selectedChannel === INTERACTIONS_CHANNEL ? "⚡" : "#"}
+          </span>
+          <span className="text-white font-semibold">
+            {channelName(selectedChannel || "")}
+          </span>
+        </div>
+
+        {/* Messages / Interactions */}
+        <div className="flex-1 overflow-y-auto px-4 py-2 space-y-0">
+          {selectedChannel === INTERACTIONS_CHANNEL ? (
+            // Render interaction conversations
+            interactionEntries.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-[#949ba4] italic">No interactions</p>
+              </div>
+            ) : (
+              interactionEntries.map((entry) => (
+                <div key={entry.id} className="mb-2">
+                  {/* User invocation */}
+                  {entry.command && (
+                    <div className="group flex gap-4 py-0.5 hover:bg-[#2e3035] -mx-4 px-4 rounded">
+                      <div className="flex-shrink-0 w-10 pt-0.5">
+                        <div className="w-10 h-10 rounded-full bg-[#3ba55c] flex items-center justify-center">
+                          <span className="text-white text-sm font-bold">U</span>
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-[#3ba55c] font-medium">User</span>
+                          <span className="text-[11px] text-[#949ba4]">
+                            {formatTime(entry.response.respondedAt)}
+                          </span>
+                        </div>
+                        <div className="text-[#dbdee1] text-[15px]">
+                          <span className="bg-[#404249] text-[#00aff4] rounded px-1.5 py-0.5 text-sm font-medium">
+                            /{entry.command}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* Bot response */}
+                  <div className="group flex gap-4 py-0.5 hover:bg-[#2e3035] -mx-4 px-4 rounded">
+                    <div className="flex-shrink-0 w-10 pt-0.5">
+                      <div className="w-10 h-10 rounded-full bg-[#5865f2] flex items-center justify-center">
+                        <span className="text-white text-sm font-bold">B</span>
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-[#f2f3f5] font-medium">Bot</span>
+                        <span className="inline-flex items-center bg-[#5865f2] text-white text-[10px] font-medium px-1 rounded ml-0.5">APP</span>
+                        <span className="text-[11px] text-[#949ba4]">
+                          {formatTime(entry.response.respondedAt)}
+                        </span>
+                      </div>
+                      <div className="text-[#dbdee1] text-[15px] leading-relaxed break-words whitespace-pre-wrap">
+                        {entry.response.payload.content || (
+                          <span className="italic text-[#949ba4]">[no content]</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {/* Followups */}
+                  {entry.followups.map((f) => (
+                    <div key={f.id} className="group flex gap-4 py-0.5 hover:bg-[#2e3035] -mx-4 px-4 rounded">
+                      <div className="flex-shrink-0 w-10 pt-0.5">
+                        <div className="w-10 h-10 rounded-full bg-[#5865f2] flex items-center justify-center">
+                          <span className="text-white text-sm font-bold">B</span>
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-[#f2f3f5] font-medium">Bot</span>
+                          <span className="text-[10px] text-[#949ba4] italic">followup</span>
+                          <span className="text-[11px] text-[#949ba4]">
+                            {formatTime(f.createdAt)}
+                          </span>
+                        </div>
+                        <div className="text-[#dbdee1] text-[15px] leading-relaxed break-words whitespace-pre-wrap">
+                          {f.payload.content || (
+                            <span className="italic text-[#949ba4]">[no content]</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))
+            )
+          ) : (
+            // Render regular channel messages
+            currentMessages.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-[#949ba4] italic">No messages in this channel</p>
+              </div>
+            ) : (
+              currentMessages.map((msg, i) => {
+                const prevMsg = i > 0 ? currentMessages[i - 1] : null;
+                const isEdited = msg.editHistory && msg.editHistory.length > 0;
+                const msgReactions = reactionsByMsg.get(msg.id);
+                const showDateDivider =
+                  !prevMsg || formatDate(msg.createdAt) !== formatDate(prevMsg.createdAt);
+
+                return (
+                  <div key={msg.id}>
+                    {showDateDivider && (
+                      <div className="flex items-center my-4">
+                        <div className="flex-1 border-t border-[#3f4147]" />
+                        <span className="px-3 text-[11px] font-semibold text-[#949ba4]">
+                          {formatDate(msg.createdAt)}
+                        </span>
+                        <div className="flex-1 border-t border-[#3f4147]" />
+                      </div>
+                    )}
+                    <div className="group flex gap-4 py-0.5 hover:bg-[#2e3035] -mx-4 px-4 rounded">
+                      <div className="flex-shrink-0 w-10 pt-0.5">
+                        <div className="w-10 h-10 rounded-full bg-[#5865f2] flex items-center justify-center">
+                          <span className="text-white text-sm font-bold">B</span>
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-[#f2f3f5] font-medium hover:underline cursor-default">
+                            Bot
+                          </span>
+                          <span className="text-[11px] text-[#949ba4]">
+                            {formatTime(msg.createdAt)}
+                          </span>
+                        </div>
+                        <div className="text-[#dbdee1] text-[15px] leading-relaxed break-words">
+                          {msg.payload.content || (
+                            <span className="italic text-[#949ba4]">[no content]</span>
+                          )}
+                          {isEdited && (
+                            <span className="text-[10px] text-[#949ba4] ml-1" title={`Edited — original: "${msg.editHistory![0].payload.content || ""}"`}>
+                              (edited)
+                            </span>
+                          )}
+                        </div>
+                        {msgReactions && msgReactions.size > 0 && (
+                          <div className="flex gap-1 mt-1 flex-wrap">
+                            {[...msgReactions.entries()].map(([emoji, count]) => (
+                              <span
+                                key={emoji}
+                                className="inline-flex items-center gap-1 bg-[#2b2d31] border border-[#3f4147] rounded-full px-2 py-0.5 text-sm"
+                              >
+                                <span>{emoji}</span>
+                                {count > 1 && (
+                                  <span className="text-[#dbdee1] text-xs">{count}</span>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TenantList({
   tenants,
   onSelect,
@@ -308,10 +683,24 @@ function TenantDetailView({
         )}
       </div>
 
+      {/* Discord-like message view */}
+      {state && (state.messages.length > 0 || state.reactions.length > 0 || state.interactionResponses.length > 0 || state.followups.length > 0) && (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200 mb-3">Messages</h2>
+          <DiscordMessageView
+            messages={state.messages}
+            reactions={state.reactions}
+            channels={guilds.flatMap((g) => g.channels)}
+            interactionResponses={state.interactionResponses}
+            followups={state.followups}
+          />
+        </div>
+      )}
+
       {/* Mutable state sections */}
       {state && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200 mb-3">State</h2>
+          <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200 mb-3">Raw State</h2>
           <div className="space-y-2">
             <DataSection title="Messages" count={state.messages.length}>
               {state.messages.length === 0 ? (
@@ -395,7 +784,10 @@ function App() {
       ]);
       const tenantsData = await tenantsRes.json();
       const logsData = await logsRes.json();
-      setTenants(tenantsData.tenants);
+      const sorted = (tenantsData.tenants as TenantSummary[]).sort(
+        (a, b) => b.createdAt.localeCompare(a.createdAt)
+      );
+      setTenants(sorted);
       setUnassociatedLogs(
         (logsData.logs as AuditLogEntry[]).filter((l) => l.tenantId == null)
       );
