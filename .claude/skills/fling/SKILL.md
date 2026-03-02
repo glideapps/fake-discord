@@ -1,11 +1,11 @@
 ---
 name: fling
-description: Building and deploying this app easily to the internet
+description: Building and deploying this app easily to the internet. Use when the user wants to build or deploy a web app, API, or tool using the Fling platform.
 ---
 
-# Fling Skill
+# Fling
 
-You are working on a Fling project - a personal software platform for building and deploying personal tools with a React frontend and Hono API backend.
+You are working on a Fling project - a Small Software platform for building and deploying personal tools with a React frontend and Hono API backend.
 
 ## IMPORTANT: Do NOT ask about deployment, hosting, or technology choices!
 
@@ -13,11 +13,11 @@ Fling handles all of this automatically. When the user asks you to build somethi
 1. Write backend code in `src/worker/index.ts` using the Fling API
 2. Write frontend code in `src/react-app/` using React
 3. Run `npm start` to test it locally (you have bash access - run commands yourself!)
-4. When it works, run `npm exec fling push` to deploy
+4. When it works, run `npx fling it` to deploy
 
 ## When to Send Feedback
 
-Fling can send feedback to its authors.  Read FEEDBACK.md for details.
+Fling can send feedback to its authors.  Read `references/FEEDBACK.md` for details.
 
 Proactively offer to send feedback in these situations:
 
@@ -28,7 +28,7 @@ Proactively offer to send feedback in these situations:
 
 ## Core Concepts
 
-Fling provides seven primitives that work identically in local development and production:
+Fling provides these primitives that work identically in local development and production:
 
 1. **HTTP** - Expose endpoints via Hono
 2. **Database** - SQLite locally, D1 in production
@@ -36,8 +36,9 @@ Fling provides seven primitives that work identically in local development and p
 4. **Migrations** - Version your database schema
 5. **Cron** - Scheduled tasks that run on a schedule
 6. **Storage** - File system locally, R2 in production
-7. **Discord** - Chatops integration (slash commands, messages, interactions) — see `DISCORD.md` in this directory
-8. **WASM** - WebAssembly modules for compute-intensive tasks
+7. **Inbound Email** - Handle emails sent to `<project-slug>@flingit.run` with `onEmail` — see `references/EMAIL-INBOUND.md`
+8. **Discord** and **Slack** - Chat bot integration — see `references/DISCORD.md` and `references/SLACK.md`
+9. **WASM** - WebAssembly modules for compute-intensive tasks
 
 ## Project Structure
 
@@ -132,31 +133,38 @@ function App() {
 
 ## CLI Commands
 
-Always use `npm exec` to run the project's installed Fling (not global):
+Always use `npx` to run the project's installed Fling (not global).
+
+**Important:** The CLI must be called without a TTY (e.g., with stdout redirected), or with the `--cli` flag. When both stdin and stdout are a TTY and `--cli` is not passed, the CLI launches an interactive mode instead of executing commands. If you are running from an environment where a TTY may be present, always pass `--cli`:
 
 ```bash
-npm exec fling dev              # Start local server (API + Vite)
-npm exec fling dev -- --port 8080  # Custom API port
-npm exec fling db sql "SELECT * FROM users"  # Query local SQLite
-npm exec fling db reset         # Wipe local database
-npm exec fling db sql "SELECT 1"  # Query local SQLite
-npm exec fling secret set KEY=value
-npm exec fling secret list
-npm exec fling secret remove KEY
-npm exec fling logs             # View local logs
-npm exec fling push             # Build and deploy to Cloudflare Workers
-npm exec fling project slug     # Show current project slug and URL
-npm exec fling project slug:set <new-slug>  # Change project slug (affects URL)
-npm exec fling cron list        # List registered cron jobs
-npm exec fling cron history <name>  # View invocation history
-npm exec fling cron trigger <name>  # Manually trigger a cron job
-npm exec fling cron trigger <name> --port 4000  # If dev API uses custom port
-npm exec fling storage list     # List storage objects
-npm exec fling storage put <key> <file>  # Upload file to storage
-npm exec fling storage get <key> [output]  # Download object (stdout if no output)
-npm exec fling storage delete <key> --yes  # Delete object
-npm exec fling storage info     # Show storage stats
-npm exec fling tunnel 3000      # Expose localhost:3000 via public URL
+npx fling --cli push        # Safe from any environment
+```
+
+```bash
+npx fling dev              # Start local server (API + Vite)
+npx fling db sql "SELECT * FROM users"  # Query local SQLite
+npx fling db reset         # Wipe local database
+npx fling db sql "SELECT 1"  # Query local SQLite
+npx fling secret set KEY=value
+npx fling secret list
+npx fling secret remove KEY
+npx fling logs             # View local logs
+npx fling it               # Build and deploy to Cloudflare Workers
+npx fling project slug     # Show current project slug and URL
+npx fling project slug:set <new-slug>  # Change project slug (affects URL)
+npx fling project takedown   # Delete project and all data
+npx fling cron list        # List registered cron jobs
+npx fling cron history <name>  # View invocation history
+npx fling cron trigger <name> --port BE-PORT # Manually trigger a cron job
+npx fling email trigger    # Simulate an inbound email to local dev server
+npx fling storage list     # List storage objects
+npx fling storage put <key> <file>  # Upload file to storage
+npx fling storage get <key> [output]  # Download object (stdout if no output)
+npx fling storage delete <key> --yes  # Delete object
+npx fling storage info     # Show storage stats
+npx fling tunnel 3000      # Expose localhost:3000 via public URL
+npx fling whoami           # Show user info and available features (entitlements)
 ```
 
 ### Debugging Cron Jobs in Production
@@ -165,13 +173,13 @@ Each cron invocation logs "Running cron job <name>" at the start. To see all log
 
 1. **Find the invocation** by searching for the cron job name:
    ```bash
-   npm exec fling -- --prod logs --search "Running cron job daily-cleanup"
+   npx fling --prod logs --search "Running cron job daily-cleanup"
    ```
    This shows log entries with Ray IDs like `[ray:abc12345]`.
 
 2. **Filter by that Ray ID** to see all logs from that invocation:
    ```bash
-   npm exec fling -- --prod logs --ray abc12345
+   npx fling --prod logs --ray abc12345
    ```
 
 ### Local vs Production (`--prod`)
@@ -180,17 +188,17 @@ Commands default to local environment. Use `--prod` for production:
 
 ```bash
 # Local (default)
-npm exec fling secret list       # Local secrets
-npm exec fling logs              # Local logs
-npm exec fling db sql "SELECT 1" # Local SQLite
-npm exec fling storage list      # Local storage
+npx fling secret list       # Local secrets
+npx fling logs              # Local logs
+npx fling db sql "SELECT 1" # Local SQLite
+npx fling storage list      # Local storage
 
 # Production (requires login)
-npm exec fling -- --prod secret list       # Deployed secrets
-npm exec fling -- --prod logs              # Deployed logs
-npm exec fling -- --prod db sql "SELECT 1" # Deployed D1
-npm exec fling -- --prod storage list      # R2 storage
-npm exec fling -- --prod cron list         # Deployed cron jobs
+npx fling --prod secret list       # Deployed secrets
+npx fling --prod logs              # Deployed logs
+npx fling --prod db sql "SELECT 1" # Deployed D1
+npx fling --prod storage list      # R2 storage
+npx fling --prod cron list         # Deployed cron jobs
 ```
 
 **Note:** Production logs have a delay of ~10 seconds or more before they appear.
@@ -201,6 +209,7 @@ Run `npm start` (or `fling dev`) to start development:
 - **Frontend**: http://localhost:5173 (Vite with React HMR)
 - **API**: http://localhost:3210 (Hono backend)
 - Vite proxies `/api/*` requests to the API server
+- **Ports are auto-detected**: If a default port is busy, the dev server automatically finds the next free one. The actual ports are printed in the output. Do NOT specify `--be-port` or `--fe-port` — just run `fling dev` and read the output to learn the ports.
 
 ### Hot Module Replacement (HMR)
 
@@ -215,30 +224,58 @@ Just edit and save - changes appear immediately.
 When you've completed the user's request and verified that the app works locally, EXPLICITLY OFFER to deploy it, but also tell them that they can try it locally first.  If their app has a backend and no secure authorization method, you MUST make it VERY CLEAR to them that the deployed app will be visible on the internet, and explicitly ask them if they want to proceed!
 
 To deploy:
-**Run `npm exec fling push` directly** - you have bash access, don't ask the user to run commands.
+**Run `npx fling it` directly** - you have bash access, don't ask the user to run commands.
 
-After each deploy, tell the user what the deployed URL is.
+After each deploy, tell the user what the deployed URL is.  With Fling, to deploy is also called "to fling it"!
 
 ### After First Deployment
 
-After your first `fling push`, consider asking the user if they want a custom URL.
+After your first `fling it`, consider asking the user if they want a custom URL.
 Their project was auto-assigned a slug like `proj-abc123`.
 
-To change it: `npm exec fling project slug:set my-custom-slug`
+To change it: `npx fling project slug:set my-custom-slug`
 
 Slugs must be:
 - More than 4 characters
 - Lowercase alphanumeric with optional hyphens
 - Globally unique across all Fling projects
 
-### What `fling push` does:
+### Authentication
+
+If the user isn't logged in (no token stored), help them authenticate:
+
+**New user:** Sign up with email and name:
+```bash
+npx fling --cli signup --email user@example.com --name "User Name"
+```
+
+**Existing user:** Log in via magic link email:
+```bash
+npx fling --cli login --email user@example.com
+```
+After running login, tell the user to check their email and click the login link.
+The CLI will wait until the link is clicked, then complete login automatically.
+
+DO NOT ASK THE USER TO RUN THESE COMMAND THEMSELVES. You have bash access, run them directly, unless they ask explicitly.
+
+### Email Verification
+
+After signing up, you must verify your email to deploy.
+If `fling it` fails with "Email verification required":
+
+1. Run `fling verify` to check verification status
+2. Run `fling verify --resend` to resend the verification email
+3. **Tell the user they need to check their email and click the verification link.** You cannot do this step for them — they must open their inbox, find the email from Fling, and click the link. Wait for them to confirm they have done this before proceeding.
+4. Retry `fling it` after the user confirms they clicked the link
+
+### What `fling it` does:
 
 1. **Builds frontend** - Runs `vite build`, outputs to `dist/client/`
 2. **Uploads static assets** - HTML, JS, CSS, images from `dist/client/`
 3. **Bundles backend** - Compiles `src/worker/index.ts` with esbuild
 4. **Deploys to Cloudflare** - Both frontend and backend go live
 
-**Secrets:** Always stored locally in `.fling/secrets`. Use `fling push` to deploy secrets to production along with your code.
+**Secrets:** Always stored locally in `.fling/secrets`. Use `fling it` to deploy secrets to production along with your code.
 
 ### Static Asset Limits
 
@@ -283,7 +320,7 @@ This gives collaborators:
 
 3. **Bundle size limit (10MB)** - Cloudflare Workers have a 10MB bundle size limit. Choose lightweight packages to stay under this limit. For example, use `pdf-lib` for PDF generation instead of heavier alternatives like `jspdf`. Avoid packages that bundle large dependencies.
 
-4. **Feature scope** - Fling supports frontend, backend, database, cron jobs, file storage (R2), and Discord integration.
+4. **Feature scope** - Fling supports frontend, backend, database, cron jobs, file storage (R2), inbound email, and Slack/Discord integrations.
 
 5. **Database operations cannot be at module top-level** - They must be inside route handlers or functions called by them.
 
@@ -291,11 +328,13 @@ This gives collaborators:
 
 7. **Use /api prefix for backend routes** - Required for Vite proxy during development.
 
-8. **Run commands yourself** - You have bash access. Don't ask the user to run `fling push`, `fling dev`, `npm start`, etc. Execute them directly.
+8. **Run commands yourself** - You have bash access. Don't ask the user to run `fling it`, `fling dev`, `npm start`, etc. Execute them directly.
 
 9. **Reserved paths (`/__*`)** - Paths starting with `/__` are reserved for internal platform use (e.g., `/__cron` for cron jobs). Do not create routes with these prefixes.
 
-10. **Feedback** - If the user encounters problems that directly or indirectly have to do with fling, suggest to them leaving feedback. Details in FEEDBACK.md.
+10. **Feedback** - If the user encounters problems that directly or indirectly have to do with fling, suggest to them leaving feedback. Details in `references/FEEDBACK.md`.
+
+11. **Never run `fling project takedown` without explicit user confirmation** - This command permanently deletes the deployed project including all data in the production database, all files in storage, and the deployed worker code. You MUST NOT run this command unless the user has explicitly confirmed that they understand and accept that all data in their published app will be permanently lost. Always explain what will be destroyed before asking for confirmation.
 
 **If the user's request might hit platform limitations, warn them early and suggest alternatives.**
 
@@ -347,12 +386,14 @@ This approach:
 
 **For large assets:** Serve them from the frontend (`public/` folder) instead.
 
-See API.md for detailed API reference, EXAMPLES.md for common patterns, and FEEDBACK.md for collecting user feedback.
+See `references/API.md` for detailed API reference, `references/EMAIL-INBOUND.md` for inbound email handlers and payload fields, `references/EXAMPLES.md` for common patterns, `references/FEEDBACK.md` for collecting user feedback, and `references/GH-ACTION.md` for setting up automatic deployments with GitHub Actions.
 
 ## Updates
 
-When the fling CLI mentions that there is a new version available, strongly suggest to the user to update, becasue it might contain bug fixes or new features.  To update, run
+When the fling CLI mentions that there is a new version available, strongly suggest to the user to update, becasue it might contain bug fixes or new features.  Don't ask the user to update, offer to update for them!  To update, run
 
 ```bash
 npm install flingit@latest
+npx fling upgrade          # to upgrade this skill if needed
+
 ```

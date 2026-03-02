@@ -2,7 +2,7 @@
 
 A multi-tenant fake Discord API server for integration testing. It impersonates Discord's REST API so that a Discord plugin worker can be tested end-to-end without touching real Discord.
 
-Built on [Fling](https://fling.dev) with D1 (SQLite) for persistent state.
+Built with [💥Fling](https://fling.dev)!
 
 **Live at: https://fake-discord.flingit.run**
 
